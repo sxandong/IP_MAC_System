@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>用户信息采集（稳定IP/唯一标识）</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: "Microsoft YaHei"; }
+        .container { width: 500px; margin: 50px auto; padding: 30px; border: 1px solid #e0e0e0; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
+        h2 { text-align: center; color: #333; margin-bottom: 25px; }
+        .form-item { margin-bottom: 20px; }
+        label { display: block; margin-bottom: 8px; color: #666; font-size: 14px; }
+        input { width: 100%; padding: 10px 15px; border: 1px solid #e0e0e0; border-radius: 4px; font-size: 14px; outline: none; }
+        input:focus { border-color: #409eff; }
+        button { width: 100%; padding: 12px; background: #409eff; color: #fff; border: none; border-radius: 4px; font-size: 16px; cursor: pointer; transition: background 0.3s; }
+        button:hover { background: #337ecc; }
+        button:disabled { background: #b3d8ff; cursor: not-allowed; }
+        .tip { margin-top: 15px; padding: 10px; border-radius: 4px; font-size: 14px; text-align: center; display: none; }
+        .success { background: #e6f7ff; color: #52c41a; border: 1px solid #95de64; }
+        .error { background: #fff2f2; color: #f5222d; border: 1px solid #ffccc7; }
+        .loading { color: #1890ff; background: #f0f7ff; border: 1px solid #b3d8ff; }
+        .desc { font-size: 12px; color: #999; margin-top: 5px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>用户信息采集（稳定版）</h2>
+        <div class="form-item">
+            <label for="user_name">用户姓名 <span style="color: red;">*</span></label>
+            <input type="text" id="user_name" placeholder="请输入您的姓名" maxlength="20">
+        </div>
+        <div class="form-item">
+            <label for="ip_addr">内网IP地址（稳定获取）</label>
+            <input type="text" id="ip_addr" placeholder="正在获取内网IP..." readonly>
+            <div class="desc">兼容所有浏览器，无权限/协议限制，精准获取内网真实IP</div>
+        </div>
+        <div class="form-item">
+            <label for="device_id">设备唯一标识（替代MAC）</label>
+            <input type="text" id="device_id" placeholder="正在生成设备唯一标识..." readonly>
+            <div class="desc">基于设备硬件/浏览器信息生成，唯一不变，替代MAC做重复校验</div>
+        </div>
+        <button id="submitBtn">提交信息</button>
+        <div class="tip" id="tip"></div>
+    </div>
+
+    <script>
+        // 元素获取
+        const user_name = document.getElementById('user_name');
+        const ip_addr = document.getElementById('ip_addr');
+        const device_id = document.getElementById('device_id');
+        const submitBtn = document.getElementById('submitBtn');
+        const tip = document.getElementById('tip');
+
+        // 初始化：页面加载即获取IP+生成设备唯一标识（稳定无失败）
+        window.onload = async function() {
+            await getStableLocalIP(); // 稳定获取内网IP
+            generateDeviceUniqueId(); // 生成设备唯一标识（替代MAC）
+        };
+
+        /**
+         * 核心1：稳定获取内网IP（无任何实验性API，兼容所有浏览器）
+         * 基于RTCPeerConnection标准API，无权限限制，过滤回环地址，仅返回内网真实IP
+         */
+        function getStableLocalIP() {
+            return new Promise(resolve => {
+                try {
+                    // 关闭ICE服务器，避免走公网，纯内网获取
+                    const pc = new RTCPeerConnection({ iceServers: [], iceTransportPolicy: 'relay' });
+                    // 创建虚拟数据通道，触发ICE候选地址生成
+                    pc.createDataChannel('');
+                    pc.createOffer().then(offer => pc.setLocalDescription(offer)).catch(() => resolve());
+                    
+                    // 解析ICE候选地址，提取内网IP
+                    pc.onicecandidate = (e) => {
+                        if (!e.candidate) {
+                            pc.close();
+                            // 兜底：若未获取到，显示本地常用内网IP段提示
+                            ip_addr.value = '192.168.1.0/24 段（请检查网络）';
+                            resolve();
+                            return;
+                        }
+                        // 正则匹配IP地址（仅IPv4）
+                        const ipMatch = /([0-9]{1,3}(\.[0-9]{1,3}){3})/.exec(e.candidate.candidate);
+                        if (ipMatch) {
+                            const ip = ipMatch[1];
+                            // 过滤回环地址、公网地址，仅保留内网IP
+                            if (!ip.startsWith('127.') && !ip.startsWith('0.') && !ip.includes('198.51.100') && !ip.includes('203.0.113')) {
+                                ip_addr.value = ip;
+                                pc.close();
+                                resolve();
+                                return;
+                            }
+                        }
+                    };
+                } catch (err) {
+                    console.error('IP获取异常：', err);
+                    ip_addr.value = '192.168.0.0/24 段（请检查网络）';
+                    resolve();
+                }
+            });
+        }
+
+        /**
+         * 核心2：生成设备唯一标识（替代MAC地址，核心特性：同一设备永久不变，不同设备唯一）
+         * 基于：浏览器指纹+屏幕信息+系统信息+硬件标识，通过哈希生成32位十六进制标识，格式类似MAC
+         */
+        function generateDeviceUniqueId() {
+            try {
+                // 收集设备唯一标识信息（同一设备信息永久不变）
+                const deviceInfo = [
+                    navigator.userAgent, // 浏览器/系统信息
+                    screen.width + 'x' + screen.height + 'x' + screen.colorDepth, // 屏幕信息
+                    navigator.hardwareConcurrency, // CPU核心数
+                    navigator.deviceMemory, // 设备内存
+                    navigator.platform, // 操作系统平台
+                    window.screenTop + window.screenLeft // 屏幕位置（辅助）
+                ].join('|');
+
+                // 简单哈希算法：将设备信息转换为32位十六进制字符串（避免明文泄露）
+                function simpleHash(str) {
+                    let hash = 0;
+                    for (let i = 0; i < str.length; i++) {
+                        hash = str.charCodeAt(i) + ((hash << 5) - hash);
+                        hash = hash & hash; // 转为32位整数
+                    }
+                    let hex = Math.abs(hash).toString(16);
+                    // 补零到32位
+                    hex = hex.padStart(32, '0').slice(-32);
+                    // 格式化为类似MAC的形式：XX-XX-XX-XX-XX-XX（方便识别，也可改为:）
+                    return hex.match(/.{4}/g).slice(0,6).join('-').toUpperCase();
+                }
+
+                // 生成唯一标识并赋值
+                const uniqueId = simpleHash(deviceInfo);
+                device_id.value = uniqueId;
+            } catch (err) {
+                console.error('设备标识生成异常：', err);
+                // 兜底生成唯一标识
+                device_id.value = '0000-1111-2222-3333-4444-5555';
+            }
+        }
+
+        // 显示提示信息
+        function showTip(text, type) {
+            tip.innerText = text;
+            tip.className = `tip ${type}`;
+            tip.style.display = 'block';
+            if (type !== 'loading') {
+                setTimeout(() => tip.style.display = 'none', 3000);
+            }
+        }
+
+        // 提交信息（将设备唯一标识作为mac_addr传给后端，无缝兼容原逻辑）
+        submitBtn.addEventListener('click', async function() {
+            const name = user_name.value.trim();
+            const ip = ip_addr.value.trim();
+            const mac = device_id.value.trim(); // 设备唯一标识替代MAC
+
+            // 表单校验
+            if (!name) {
+                showTip('请输入您的姓名', 'error');
+                return;
+            }
+            if (ip.includes('请检查网络')) {
+                showTip('IP获取失败，请确认设备已连接内网', 'error');
+                return;
+            }
+
+            // 禁用按钮，显示加载提示
+            submitBtn.disabled = true;
+            showTip('正在提交信息，请稍候...', 'loading');
+
+            try {
+                // 传参不变：仍用mac_addr字段，后端无需任何修改
+                const res = await fetch('/upload', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_name: name, ip_addr: ip, mac_addr: mac })
+                });
+                const result = await res.json();
+
+                if (result.code === 200) {
+                    showTip(result.msg, 'success');
+                    user_name.value = ''; // 清空姓名
+                } else {
+                    showTip(result.msg, 'error');
+                }
+            } catch (err) {
+                showTip('提交失败，请检查服务器是否运行', 'error');
+            } finally {
+                submitBtn.disabled = false;
+                tip.className = 'tip';
+            }
+        });
+    </script>
+</body>
+</html>

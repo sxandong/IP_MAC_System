@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>用户信息管理系统</title>
+    <!-- 每分钟（60秒）自动刷新页面，content值为刷新间隔（单位：秒） -->
+    <meta http-equiv="refresh" content="60">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: "Microsoft YaHei"; }
+        .container { width: 95%; margin: 30px auto; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px; }
+        h2 { color: #333; }
+        .operate { display: flex; gap: 10px; }
+        input { padding: 8px 15px; border: 1px solid #e0e0e0; border-radius: 4px; outline: none; width: 250px; }
+        button { padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer; transition: background 0.3s; color: #fff; }
+        .query-btn { background: #67c23a; }
+        .query-btn:hover { background: #529e2e; }
+        .export-btn { background: #1890ff; }
+        .export-btn:hover { background: #0e75c9; }
+        .table-box { overflow-x: auto; border: 1px solid #e0e0e0; border-radius: 4px; }
+        table { width: 100%; border-collapse: collapse; text-align: center; }
+        th, td { padding: 12px; border: 1px solid #e0e0e0; font-size: 14px; }
+        th { background: #f5f7fa; color: #666; font-weight: normal; }
+        tr:hover { background: #fafafa; }
+        .edit-btn { background: #ff9800; margin-right: 5px; }
+        .edit-btn:hover { background: #e68900; }
+        .del-btn { background: #f56c6c; }
+        .del-btn:hover { background: #e45656; }
+        .tip { position: fixed; top: 20px; right: 20px; padding: 12px 20px; border-radius: 4px; color: #fff; z-index: 999; display: none; }
+        .success-tip { background: rgba(103, 194, 58, 0.9); }
+        .error-tip { background: rgba(245, 108, 108, 0.9); }
+        .modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: none; justify-content: center; align-items: center; z-index: 1000; }
+        .modal-content { width: 400px; background: #fff; border-radius: 8px; padding: 25px; }
+        .modal-title { font-size: 16px; color: #333; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
+        .modal-close { cursor: pointer; color: #999; font-size: 20px; }
+        .modal-form-item { margin-bottom: 15px; }
+        .modal-form-item label { display: block; margin-bottom: 5px; color: #666; font-size: 14px; }
+        .modal-form-item input { width: 100%; }
+        .modal-btn { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+        .cancel-btn { background: #909399; }
+        .cancel-btn:hover { background: #7b7e83; }
+        .save-btn { background: #409eff; }
+        .save-btn:hover { background: #337ecc; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h2>用户信息管理系统</h2>
+            <div class="operate">
+                <input type="text" id="keyword" placeholder="请输入姓名/IP/MAC查询">
+                <button class="query-btn" onclick="queryCondition()">查询</button>
+                <button class="export-btn" onclick="exportExcel()">导出Excel</button>
+            </div>
+        </div>
+        <div class="table-box">
+            <table id="dataTable">
+                <thead>
+                    <tr>
+                        <th>序号</th>
+                        <th>用户姓名</th>
+                        <th>网卡类型</th>
+                        <th>IP地址</th>
+                        <th>MAC地址</th>
+                        <th>创建时间</th>
+                        <th>更新时间</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody id="dataBody">
+                    <!-- 数据由JS动态渲染 -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- 操作提示框 -->
+    <div class="tip" id="tip"></div>
+
+    <!-- 修改数据弹窗 -->
+    <div class="modal" id="editModal">
+        <div class="modal-content">
+            <div class="modal-title">
+                <span>修改用户信息</span>
+                <span class="modal-close" onclick="closeModal()">&times;</span>
+            </div>
+            <input type="hidden" id="editId">
+            <div class="modal-form-item">
+                <label>用户姓名 <span style="color: red;">*</span></label>
+                <input type="text" id="editName" placeholder="请输入姓名">
+            </div>
+            <div class="modal-form-item">
+                <label>网卡类型</label>
+                <input type="text" id="editNicType" placeholder="请输入网卡类型">
+            <div class="modal-form-item">
+                <label>IP地址 <span style="color: red;">*</span></label>
+                <input type="text" id="editIp" placeholder="请输入IP地址">
+            </div>
+            <div class="modal-form-item">
+                <label>MAC地址 <span style="color: red;">*</span></label>
+                <input type="text" id="editMac" placeholder="请输入MAC地址">
+            </div>
+            <div class="modal-btn">
+                <button class="cancel-btn" onclick="closeModal()">取消</button>
+                <button class="save-btn" onclick="saveEdit()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 页面加载完成后加载所有数据
+        window.onload = function() {
+            queryAll();
+        };
+
+        // 显示提示框
+        function showTip(text, type) {
+            const tip = document.getElementById('tip');
+            tip.innerText = text;
+            tip.className = `tip ${type}-tip`;
+            tip.style.display = 'block';
+            setTimeout(() => tip.style.display = 'none', 3000);
+        }
+
+        // 1. 查询所有数据
+        async function queryAll() {
+            try {
+                const res = await fetch('/query/all');
+                const result = await res.json();
+                if (result.code === 200) {
+                    renderTable(result.data);
+                } else {
+                    showTip('数据加载失败', 'error');
+                }
+            } catch (err) {
+                showTip('服务器连接失败', 'error');
+            }
+        }
+
+        // 2. 条件查询
+        async function queryCondition() {
+            const keyword = document.getElementById('keyword').value.trim();
+            if (!keyword) {
+                showTip('请输入查询关键词', 'error');
+                return;
+            }
+            try {
+                const res = await fetch(`/query/condition?keyword=${encodeURIComponent(keyword)}`);
+                const result = await res.json();
+                if (result.code === 200) {
+                    renderTable(result.data);
+                } else {
+                    showTip(result.msg, 'error');
+                }
+            } catch (err) {
+                showTip('查询失败', 'error');
+            }
+        }
+
+        // 3. 渲染表格数据
+        function renderTable(data) {
+            const dataBody = document.getElementById('dataBody');
+            if (data.length === 0) {
+                dataBody.innerHTML = '<tr><td colspan="7" style="color: #999;">暂无数据</td></tr>';
+                return;
+            }
+            let html = '';
+            data.forEach(item => {
+                html += `
+                    <tr>
+                        <td>${item.id}</td>
+                        <td>${item.user_name}</td>
+                        <td>${item.nic_type}</td>
+                        <td>${item.ip_addr}</td>
+                        <td>${item.mac_addr}</td>
+                        <td>${item.create_time}</td>
+                        <td>${item.update_time}</td>
+                        <td>
+                            <button class="edit-btn" onclick="openEditModal(${item.id}, '${item.user_name}', '${item.ip_addr}', '${item.mac_addr}', '${item.nic_type}')">修改</button>
+                            <button class="del-btn" onclick="deleteData(${item.id})">删除</button>
+                        </td>
+                    </tr>
+                `;
+            });
+            dataBody.innerHTML = html;
+        }
+
+        // 4. 打开修改弹窗
+        function openEditModal(id, name, ip, mac, nic_type) {
+            document.getElementById('editId').value = id;
+            document.getElementById('editName').value = name;
+            document.getElementById('editNicType').value = nic_type;
+            document.getElementById('editIp').value = ip;
+            document.getElementById('editMac').value = mac;
+            document.getElementById('editModal').style.display = 'flex';
+        }
+
+        // 5. 关闭修改弹窗
+        function closeModal() {
+            document.getElementById('editModal').style.display = 'none';
+            // 清空弹窗输入框
+            document.getElementById('editId').value = '';
+            document.getElementById('editName').value = '';
+            document.getElementById('editNicType').value = '';
+            document.getElementById('editIp').value = '';
+            document.getElementById('editMac').value = '';
+        }
+
+        // 6. 保存修改数据
+        async function saveEdit() {
+            const id = document.getElementById('editId').value;
+            const name = document.getElementById('editName').value.trim();
+            const nic_type = document.getElementById('editNicType').value.trim();
+            const ip = document.getElementById('editIp').value.trim();
+            const mac = document.getElementById('editMac').value.trim();
+
+            if (!_all([name, ip, mac, nic_type])) {
+                showTip('姓名/IP/MAC/网卡类型不能为空', 'error');
+                return;
+            }
+
+            try {
+                const res = await fetch(`/update/${id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_name: name, ip_addr: ip, mac_addr: mac , nic_type: nic_type })
+                });
+                const result = await res.json();
+                if (result.code === 200) {
+                    showTip('修改成功', 'success');
+                    closeModal();
+                    queryAll(); // 重新加载数据
+                } else {
+                    showTip(result.msg, 'error');
+                }
+            } catch (err) {
+                showTip('修改失败', 'error');
+            }
+        }
+
+        // 7. 删除数据
+        async function deleteData(id) {
+            if (!confirm('确定要删除这条数据吗？删除后无法恢复！')) {
+                return;
+            }
+            try {
+                const res = await fetch(`/delete/${id}`, { method: 'DELETE' });
+                const result = await res.json();
+                if (result.code === 200) {
+                    showTip('删除成功', 'success');
+                    queryAll(); // 重新加载数据
+                } else {
+                    showTip(result.msg, 'error');
+                }
+            } catch (err) {
+                showTip('删除失败', 'error');
+            }
+        }
+
+        // 8. 导出Excel
+        async function exportExcel() {
+            try {
+                const res = await fetch('/export/excel');
+                if (!res.ok) {
+                    const result = await res.json();
+                    showTip(result.msg, 'error');
+                    return;
+                }
+                // 处理文件下载
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = res.headers.get('Content-Disposition').split('filename=')[1];
+                a.click();
+                URL.revokeObjectURL(url);
+                showTip('导出成功', 'success');
+            } catch (err) {
+                showTip('导出失败', 'error');
+            }
+        }
+
+        // 辅助函数：判断所有参数是否非空
+        function _all(arr) {
+            return arr.every(item => item);
+        }
+    </script>
+</body>
+</html>

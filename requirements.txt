@@ -1,0 +1,5 @@
+flask==2.3.3
+sqlite3==2.6.0  # Python内置，无需额外安装，仅作声明
+pandas==2.1.4   # 用于数据导出Excel
+openpyxl==3.1.2 # 支持Excel写入
+requests==2.31.0# 前端IP获取依赖（后端无依赖，仅前端用）
